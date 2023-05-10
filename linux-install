@@ -30,7 +30,8 @@ BREW_BIN=/home/linuxbrew/.linuxbrew/bin
 BREW=$BREW_BIN/brew
 
 function install_apt_basics() {
-  sudo apt-get install -y build-essential tmux zsh xclip
+  # sudo apt update
+  sudo apt-get install -y build-essential tmux zsh xclip stow
 }
 
 function install_homebrew() {
@@ -43,14 +44,23 @@ function install_homebrew() {
 }
 
 function install_homebrew_basics() {
-  $BREW install ripgrep lazygit dust exa neovim pyenv
+  local progs=(ripgrep lazygit dust exa neovim pyenv fd)
+  local to_install=( )
+  for p in "${progs[@]}"; do
+    if ! command_exists $BREW_BIN/$p --version; then
+      to_install+=($p)
+    fi
+  done
+  if [[ ! -z "${to_install[@]}" ]]; then
+    $BREW install "${to_install[@]}"
+  fi
 }
 
 function install_rust() {
-  if ! command_exists cargo --version; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-    source "$HOME/.cargo/env"
+  if [[ ! -d ~/.cargo ]]; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   fi
+  source "$HOME/.cargo/env"
   if ! command_exists broot --version; then
     cargo install --locked broot
   fi
@@ -79,6 +89,7 @@ function install_dotfiles() {
   if [[ ! -d ~/dotfiles4 ]]; then
     git clone -b linux git@github.com:alfa07/dotfiles4.git ~/dotfiles4
   fi
+  (cd ~/dotfiles4 && git pull)
 }
 
 function install_nvm() {
@@ -91,32 +102,21 @@ function install_nvm() {
   fi
 }
 
+PYTHON_VER=miniconda3-4.7.12
+PYTHON_DIR=$HOME/.pyenv/versions/$PYTHON_VER
+
 function install_python() {
-  eval "$(pyenv init -)"
-  pyenv install miniconda3-4.7.12
-  pyenv global miniconda3-4.7.12
-  pip install ipython
-}
-
-# prerequisites:
-# - pyenv
-# - nvm
-# - rust
-function lvim() {
-  if [[ ! -d ~/dev/Colorschemes ]]; then
-    mkdir -p ~/dev
-    git clone -b add-solarized-light-color-scheme git@github.com:alfa07/Colorschemes.git ~/dev/Colorschemes
+  if [[ ! -d $PYTHON_DIR ]]; then
+    $BREW_BIN/pyenv install $PYTHON_VER
+    $BREW_BIN/pyenv global $PYTHON_VER
   fi
-  LV_BRANCH='release-1.3/neovim-0.9' bash <(curl -s https://raw.githubusercontent.com/LunarVim/LunarVim/release-1.3/neovim-0.9/utils/installer/install.sh)
+  # eval "$($BREW_BIN/pyenv init -)"
+  if ! command_exists $PYTHON_DIR/bin/ipython --version; then
+    $PYTHON_DIR/bin/pip install ipython
+  fi
 }
 
-function stow_basics() {
-  stow tmux fonts lvim
-  stow broot
-  mv ~/.config/broot ~/.config/broot.bak
-}
-
-function powerlevel10k() {
+function install_powerlevel10k() {
   if [[ ! -d ~/powerlevel10k ]]; then
     git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ~/powerlevel10k
     # echo 'source ~/powerlevel10k/powerlevel10k.zsh-theme' >>~/.zshrc
@@ -136,6 +136,12 @@ function install_git_lfs() {
   fi
 }
 
+function install_oh_my_zsh() {
+  if [[ ! -d ~/.oh-my-zsh ]]; then
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+  fi
+}
+
 function install_zsh_plugins() {
   local zsh_custom_plugins=$HOME/.oh-my-zsh/custom/plugins
   if [[ ! -d $zsh_custom_plugins/zsh-syntax-highlighting ]]; then
@@ -149,9 +155,62 @@ function install_zsh_plugins() {
   fi
 }
 
+function install_stow_zsh() {
+  if [[ ! -L ~/.zshrc ]]; then
+    pushd ~/dotfiles4
+    stow --adopt -v p10k zsh tmux zsh-base broot fzf
+    git restore .
+    stow -R p10k zsh tmux zsh-base broot fzf
+    popd
+  fi
+}
+
+function install_fzf_step2() {
+  if [[ ! -x ~/.fzf/bin/fzf ]]; then 
+    ~/.fzf/install --bin --key-bindings --completion --no-update-rc
+  fi
+}
+
+# prerequisites:
+# - pyenv
+# - nvm
+# - rust
+function install_lvim() {
+  if [[ ! -d ~/dev/Colorschemes ]]; then
+    mkdir -p ~/dev
+    git clone -b add-solarized-light-color-scheme git@github.com:alfa07/Colorschemes.git ~/dev/Colorschemes
+  fi
+  if ! command_exists lvim --version; then
+    /usr/bin/zsh -c "LV_BRANCH='release-1.3/neovim-0.9' bash <(curl -s https://raw.githubusercontent.com/LunarVim/LunarVim/release-1.3/neovim-0.9/utils/installer/install.sh)"
+  fi
+}
+
+function install_stow_lvim() {
+  if [[ ! -L ~/.config/lvim ]]; then
+    [[ -d ~/.config/lvim.bak ]] && rm -rf ~/.config/lvim.bak
+    [[ -d ~/.config/lvim ]] && mv ~/.config/lvim ~/.config/lvim.bak
+    pushd ~/dotfiles4
+    # stow --adopt -v lvim
+    # git restore .
+    stow lvim
+    popd
+  fi
+}
+
+
+
 install_apt_basics
 install_homebrew
 install_rust
 install_fzf
 install_dotfiles
 install_nvm
+install_homebrew_basics
+install_python
+install_oh_my_zsh
+install_zsh_plugins
+install_powerlevel10k
+install_stow_zsh
+install_fzf_step2
+install_lvim
+install_stow_lvim

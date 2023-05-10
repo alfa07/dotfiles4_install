@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+if [[ $# -eq 0 ]]; then
+  echo "Usage: create-vm VMNAME"
+  echo "Missing VMNAME argument"
+  exit 1
+fi
+
+if ! (multipass list | grep "$1") &> /dev/null; then
+  multipass launch -n $1 -c 8 -m 32G -d 50G --cloud-init cloud-init.yaml
+fi
