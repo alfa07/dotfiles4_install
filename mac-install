@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# set -x
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P)
+
+function setup_colors() {
+  if [[ -t 2 ]] && [[ -z "${NO_COLOR-}" ]] && [[ "${TERM-}" != "dumb" ]]; then
+    NOFORMAT='\033[0m' RED='\033[0;31m' GREEN='\033[0;32m' ORANGE='\033[0;33m' BLUE='\033[0;34m' PURPLE='\033[0;35m' CYAN='\033[0;36m' YELLOW='\033[1;33m'
+  else
+    NOFORMAT='' RED='' GREEN='' ORANGE='' BLUE='' PURPLE='' CYAN='' YELLOW=''
+  fi
+}
+
+function msg() {
+  echo >&2 -e -n "${1-}"
+}
+
+function msgln() {
+  echo >&2 -e "${1-}"
+}
+
+setup_colors
+
+# check if executable exists and runnable
+function command_exists() {
+  command -v "$1" >/dev/null 2>&1 && "$1" "$2" >/dev/null 2>&1
+}
+
+BREW_BIN=/opt/homebrew/bin
+BREW=$BREW_BIN/brew
+
+function install_homebrew() {
+  if ! command_exists $BREW --version; then
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    # (echo; echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"') >> /home/maxim/.zprofile
+    # eval "$($BREW shellenv)"
+    # xz is required for pyenv installation of 3.10 python
+    $BREW install gcc xz
+  fi
+}
+
+function install_homebrew_basics() {
+  local progs=(ripgrep lazygit dust exa neovim pyenv fd stow tmux)
+  local to_install=( )
+  for p in "${progs[@]}"; do
+    if ! command_exists $BREW_BIN/$p --version; then
+      to_install+=($p)
+    fi
+  done
+  if [[ ! -z "${to_install[@]}" ]]; then
+    $BREW install "${to_install[@]}"
+  fi
+}
+
+function install_rust() {
+  if [[ ! -d ~/.cargo ]]; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  fi
+  source "$HOME/.cargo/env"
+  if ! command_exists broot --version; then
+    cargo install --locked broot
+  fi
+}
+
+function install_fzf() {
+  if [[ ! -d ~/.fzf ]]; then
+    git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
+  fi
+  # ~/.fzf/install
+}
+
+function ensure_ssh_key() {
+  if [[ ! -e ~/.ssh/id_ed25519.pub ]]; then
+    echo "Generating key..."
+    ssh-keygen -t ed25519 -C "maximsok@gmail.com"
+    eval "$(ssh-agent -s)"
+  fi
+  cat ~/.ssh/id_ed25519.pub | xclip -sel clip
+  echo "Copied key to clipboard. Please add it to github."
+  echo "Hit ENTER when done:"
+  read
+}
+
+function install_dotfiles() {
+  if [[ ! -d ~/dotfiles4 ]]; then
+    git clone -b main git@github.com:alfa07/dotfiles4.git ~/dotfiles4
+  fi
+  # (cd ~/dotfiles4 && git pull)
+}
+
+function install_nvm() {
+  if [[ ! -d ~/.nvm ]]; then
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+    [ -s "$NVM_DIR/zsh_completion" ] && \. "$NVM_DIR/zsh_completion"  # This loads nvm bash_completion
+    nvm install node
+  fi
+}
+
+PYTHON_VER=3.10.13
+PYTHON_DIR=$HOME/.pyenv/versions/$PYTHON_VER
+
+function install_python() {
+  if [[ ! -d $PYTHON_DIR ]]; then
+    $BREW_BIN/pyenv install $PYTHON_VER
+    $BREW_BIN/pyenv global $PYTHON_VER
+  fi
+  # eval "$($BREW_BIN/pyenv init -)"
+  if ! command_exists $PYTHON_DIR/bin/ipython --version; then
+    $PYTHON_DIR/bin/pip install ipython
+  fi
+}
+
+function install_powerlevel10k() {
+  if [[ ! -d ~/powerlevel10k ]]; then
+    git clone --depth=1 https://github.com/romkatv/powerlevel10k.git ~/powerlevel10k
+    # echo 'source ~/powerlevel10k/powerlevel10k.zsh-theme' >>~/.zshrc
+  fi
+  # p10k configure
+}
+
+function install_kitty() {
+  if ! command_exists kitty --version; then
+    curl -L https://sw.kovidgoyal.net/kitty/installer.sh | sh /dev/stdin
+  fi
+}
+
+function install_git_lfs() {
+  if ! command_exists git lfs; then
+    curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash
+  fi
+}
+
+function install_oh_my_zsh() {
+  if [[ ! -d ~/.oh-my-zsh ]]; then
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+  fi
+}
+
+function install_zsh_plugins() {
+  local zsh_custom_plugins=$HOME/.oh-my-zsh/custom/plugins
+  if [[ ! -d $zsh_custom_plugins/zsh-syntax-highlighting ]]; then
+    git clone https://github.com/zsh-users/zsh-syntax-highlighting.git $zsh_custom_plugins/zsh-syntax-highlighting
+  fi
+  if [[ ! -d $zsh_custom_plugins/zsh-vi-mode ]]; then
+    git clone https://github.com/jeffreytse/zsh-vi-mode $zsh_custom_plugins/zsh-vi-mode
+  fi
+  if [[ ! -d $zsh_custom_plugins/zsh-cargo-completion ]]; then
+    git clone https://github.com/MenkeTechnologies/zsh-cargo-completion.git $zsh_custom_plugins/zsh-cargo-completion
+  fi
+}
+
+function install_stow_zsh() {
+  if [[ ! -L ~/.zshrc ]]; then
+    pushd ~/dotfiles4
+    stow --adopt -v p10k zsh zsh-base tmux broot fzf
+    git restore .
+    stow -R p10k zsh zsh-base tmux broot fzf
+    popd
+  fi
+}
+
+function install_fzf_step2() {
+  if [[ ! -x ~/.fzf/bin/fzf ]]; then 
+    ~/.fzf/install --bin --key-bindings --completion --no-update-rc
+  fi
+}
+
+# prerequisites:
+# - pyenv
+# - nvm
+# - rust
+function install_lvim() {
+  if [[ ! -d ~/dev/Colorschemes ]]; then
+    mkdir -p ~/dev
+    git clone -b add-solarized-light-color-scheme git@github.com:alfa07/Colorschemes.git ~/dev/Colorschemes
+  fi
+  if ! command_exists lvim --version; then
+    zsh -c "LV_BRANCH='release-1.3/neovim-0.9' bash <(curl -s https://raw.githubusercontent.com/LunarVim/LunarVim/release-1.3/neovim-0.9/utils/installer/install.sh)"
+  fi
+}
+
+function install_stow_lvim() {
+  if [[ ! -L ~/.config/lvim ]]; then
+    [[ -d ~/.config/lvim.bak ]] && rm -rf ~/.config/lvim.bak
+    [[ -d ~/.config/lvim ]] && mv ~/.config/lvim ~/.config/lvim.bak
+    pushd ~/dotfiles4
+    # stow --adopt -v lvim
+    # git restore .
+    stow lvim
+    popd
+  fi
+}
+
+function install_stow_kitty() {
+  if [[ ! -L ~/.config/kitty/ ]]; then
+    [[ -d ~/.config/kitty.bak ]] && rm -rf ~/.config/kitty.bak
+    [[ -d ~/.config/kitty ]] && mv ~/.config/kitty ~/.config/kitty.bak
+    pushd ~/dotfiles4
+    # stow --adopt -v lvim
+    # git restore .
+    stow kitty
+    popd
+  fi
+}
+
+
+
+install_homebrew
+install_rust
+install_fzf
+install_dotfiles
+install_nvm
+install_homebrew_basics
+install_python
+install_oh_my_zsh
+install_zsh_plugins
+install_powerlevel10k
+install_stow_zsh
+install_fzf_step2
+install_lvim
+install_stow_lvim
+install_kitty
+install_stow_kitty
